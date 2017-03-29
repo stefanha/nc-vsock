@@ -1,10 +1,10 @@
-VERSION = 1.0.0
+VERSION = 1.0.1
 TARFILE = nc-vsock-${VERSION}.tar.gz
 
 all: nc-vsock
 
 rpm:
-	wget -O ~/rpmbuild/SOURCES/${TARFILE} https://github.com/stefanha/nc-vsock/archive/v1.0.0.tar.gz
+	wget -O ~/rpmbuild/SOURCES/${TARFILE} https://github.com/stefanha/nc-vsock/archive/v${VERSION}.tar.gz
 	rpmbuild -ba nc-vsock.spec
 
 rpm-local:
