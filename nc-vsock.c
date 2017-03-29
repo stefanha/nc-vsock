@@ -175,30 +175,32 @@ static int vsock_connect(const char *cid_str, const char *port_str)
 	return fd;
 }
 
-static int get_fds(int argc, char **argv, int fds[2])
+static int get_remote_fd(int argc, char **argv)
 {
-	fds[0] = STDIN_FILENO;
-	fds[1] = -1;
-
 	if (argc >= 3 && strcmp(argv[1], "-l") == 0) {
-		fds[1] = vsock_listen(argv[2]);
-		if (fds[1] < 0) {
+		int remote_fd = vsock_listen(argv[2]);
+
+		if (remote_fd < 0) {
 			return -1;
 		}
 
 		if (argc == 6 && strcmp(argv[3], "-t") == 0) {
-			fds[0] = tcp_connect(argv[4], argv[5]);
-			if (fds[0] < 0) {
+			int fd = tcp_connect(argv[4], argv[5]);
+			if (fd < 0) {
+				return -1;
+			}
+
+			if (dup2(fd, STDIN_FILENO) < 0 ||
+			    dup2(fd, STDOUT_FILENO) < 0) {
+				perror("dup2");
+				close(fd);
+				close(remote_fd);
 				return -1;
 			}
 		}
-		return 0;
+		return remote_fd;
 	} else if (argc == 3) {
-		fds[1] = vsock_connect(argv[1], argv[2]);
-		if (fds[1] < 0) {
-			return -1;
-		}
-		return 0;
+		return vsock_connect(argv[1], argv[2]);
 	} else {
 		fprintf(stderr, "usage: %s [-l <port> [-t <dst> <dstport>] | <cid> <port>]\n", argv[0]);
 		return -1;
@@ -272,18 +274,19 @@ static int xfer_data(int in_fd, int out_fd)
 	return 0;
 }
 
-static void main_loop(int fds[2])
+static void main_loop(int remote_fd)
 {
 	fd_set rfds;
-	int nfds = fds[fds[0] > fds[1] ? 0 : 1] + 1;
+	int nfds = remote_fd + 1;
 
-	set_nonblock(fds[0], true);
-	set_nonblock(fds[1], true);
+	set_nonblock(STDIN_FILENO, true);
+	set_nonblock(STDOUT_FILENO, true);
+	set_nonblock(remote_fd, true);
 
 	for (;;) {
 		FD_ZERO(&rfds);
-		FD_SET(fds[0], &rfds);
-		FD_SET(fds[1], &rfds);
+		FD_SET(STDIN_FILENO, &rfds);
+		FD_SET(remote_fd, &rfds);
 
 		if (select(nfds, &rfds, NULL, NULL, NULL) < 0) {
 			if (errno == EINTR) {
@@ -294,14 +297,14 @@ static void main_loop(int fds[2])
 			}
 		}
 
-		if (FD_ISSET(fds[0], &rfds)) {
-			if (xfer_data(fds[0], fds[1]) < 0) {
+		if (FD_ISSET(STDIN_FILENO, &rfds)) {
+			if (xfer_data(STDIN_FILENO, remote_fd) < 0) {
 				return;
 			}
 		}
 
-		if (FD_ISSET(fds[1], &rfds)) {
-			if (xfer_data(fds[1], fds[0]) < 0) {
+		if (FD_ISSET(remote_fd, &rfds)) {
+			if (xfer_data(remote_fd, STDOUT_FILENO) < 0) {
 				return;
 			}
 		}
@@ -310,12 +313,12 @@ static void main_loop(int fds[2])
 
 int main(int argc, char **argv)
 {
-	int fds[2];
+	int remote_fd = get_remote_fd(argc, argv);
 
-	if (get_fds(argc, argv, fds) < 0) {
+	if (remote_fd < 0) {
 		return EXIT_FAILURE;
 	}
 
-	main_loop(fds);
+	main_loop(remote_fd);
 	return EXIT_SUCCESS;
 }
