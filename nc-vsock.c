@@ -179,7 +179,17 @@ static int get_remote_fd(int argc, char **argv)
 {
 	if (argc >= 3 && strcmp(argv[1], "-l") == 0) {
 		int remote_fd = vsock_listen(argv[2]);
-
+		if (argc >= 4) {
+			int o_pr00gie_shell = 0;
+  			char *o_pr00gie = NULL;
+		    	if (strcmp(argv[4], "-e") == 0) {
+				o_pr00gie_shell = 0;
+				o_pr00gie = argv[5];
+			} else if (strcmp(argv[4], "-c") == 0) {
+				o_pr00gie_shell = 1;
+				o_pr00gie = argv[5];
+			}
+		}
 		if (remote_fd < 0) {
 			return -1;
 		}
@@ -199,6 +209,7 @@ static int get_remote_fd(int argc, char **argv)
 			}
 		}
 		return remote_fd;
+		
 	} else if (argc == 3) {
 		return vsock_connect(argv[1], argv[2]);
 	} else {
@@ -274,6 +285,43 @@ static int xfer_data(int in_fd, int out_fd)
 	return 0;
 }
 
+void
+#ifdef __GNUC__
+  __attribute__ ((noreturn))
+#endif
+exec_child_pr00gie (char *pr00gie, int shell)
+{
+  char *p;
+
+  /* the precise order of fiddlage seems to be crucial; this is swiped
+     directly out of "inetd". */
+  dup2 (sock_fd, 0);
+  close (sock_fd);
+  dup2 (0, 1);
+  dup2 (0, 2);
+  sock_fd = 0;
+
+  if (shell)
+    {
+      debug_msg ("gonna exec %s using /bin/sh...", pr00gie);
+      execl ("/bin/sh", "sh", "-c", pr00gie, NULL);
+    }
+  else
+    {
+      /* Prepare a shorter argv[0] */
+      p = strrchr (pr00gie, '/');
+      if (p)
+        p++;
+      else
+        p = pr00gie;
+
+      debug_msg ("gonna exec %s as %s...", pr00gie, p);
+      execl (pr00gie, p, NULL);
+    }
+
+  bail ("failed to exec %s", pr00gie);
+}
+
 static void main_loop(int remote_fd)
 {
 	fd_set rfds;
@@ -309,6 +357,7 @@ static void main_loop(int remote_fd)
 			}
 		}
 	}
+	
 }
 
 int main(int argc, char **argv)
@@ -320,5 +369,7 @@ int main(int argc, char **argv)
 	}
 
 	main_loop(remote_fd);
+	if (o_pr00gie)
+	exec_child_pr00gie (o_pr00gie, o_pr00gie_shell);
 	return EXIT_SUCCESS;
 }
