@@ -54,7 +54,7 @@ static int parse_port(const char *port_str)
 	}
 }
 
-static int vsock_listen(const char *port_str)
+static int vsock_listen(bool seqpacket, const char *port_str)
 {
 	int listen_fd;
 	int client_fd;
@@ -65,13 +65,16 @@ static int vsock_listen(const char *port_str)
 	struct sockaddr_vm sa_client;
 	socklen_t socklen_client = sizeof(sa_client);
 	int port = parse_port(port_str);
+	int type;
+
 	if (port < 0) {
 		return -1;
 	}
 
 	sa_listen.svm_port = port;
 
-	listen_fd = socket(AF_VSOCK, SOCK_STREAM, 0);
+	type = seqpacket ? SOCK_SEQPACKET : SOCK_STREAM;
+	listen_fd = socket(AF_VSOCK, type, 0);
 	if (listen_fd < 0) {
 		perror("socket");
 		return -1;
@@ -139,11 +142,13 @@ static int tcp_connect(const char *node, const char *service)
 	return fd;
 }
 
-static int vsock_connect(const char *cid_str, const char *port_str)
+static int vsock_connect(bool seqpacket, const char *cid_str, const char *port_str)
 {
 	int fd;
 	int cid;
 	int port;
+	int type;
+
 	struct sockaddr_vm sa = {
 		.svm_family = AF_VSOCK,
 	};
@@ -160,7 +165,8 @@ static int vsock_connect(const char *cid_str, const char *port_str)
 	}
 	sa.svm_port = port;
 
-	fd = socket(AF_VSOCK, SOCK_STREAM, 0);
+	type = seqpacket ? SOCK_SEQPACKET : SOCK_STREAM;
+	fd = socket(AF_VSOCK, type, 0);
 	if (fd < 0) {
 		perror("socket");
 		return -1;
@@ -177,14 +183,26 @@ static int vsock_connect(const char *cid_str, const char *port_str)
 
 static int get_remote_fd(int argc, char **argv)
 {
-	if (argc >= 3 && strcmp(argv[1], "-l") == 0) {
-		int remote_fd = vsock_listen(argv[2]);
+	if (argc < 3) {
+		fprintf(stderr, "usage: %s [-l <port> [-t <dst> <dstport>] | <cid> <port>] [-s]\n", argv[0]);
+		return -1;
+	}
+
+	if (strcmp(argv[1], "-l") == 0) {
+		bool seqpacket = false;
+		int remote_fd;
+
+		if (strcmp(argv[argc - 1], "-s") == 0) {
+			seqpacket = true;
+		}
+
+		remote_fd = vsock_listen(seqpacket, argv[2]);
 
 		if (remote_fd < 0) {
 			return -1;
 		}
 
-		if (argc == 6 && strcmp(argv[3], "-t") == 0) {
+		if (argc == (6 + seqpacket ? 1 : 0) && strcmp(argv[3], "-t") == 0) {
 			int fd = tcp_connect(argv[4], argv[5]);
 			if (fd < 0) {
 				return -1;
@@ -198,12 +216,17 @@ static int get_remote_fd(int argc, char **argv)
 				return -1;
 			}
 		}
+
 		return remote_fd;
-	} else if (argc == 3) {
-		return vsock_connect(argv[1], argv[2]);
 	} else {
-		fprintf(stderr, "usage: %s [-l <port> [-t <dst> <dstport>] | <cid> <port>]\n", argv[0]);
-		return -1;
+		bool seqpacket = false;
+
+		if (argc == 4) {
+			if (strcmp(argv[3], "-s") == 0)
+				seqpacket = true;
+		}
+
+		return vsock_connect(seqpacket, argv[1], argv[2]);
 	}
 }
 
